@@ -1,0 +1,116 @@
+from datetime import datetime
+from typing import List, Optional
+from pydantic import BaseModel
+
+# --- MASTER DATA SCHEMAS ---
+
+class CategoryBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class CategoryCreate(CategoryBase):
+    pass
+
+class CategoryResponse(CategoryBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProductBase(BaseModel):
+    sku: str
+    name: str
+    category_id: int
+    unit_of_measure: str
+
+class ProductCreate(ProductBase):
+    pass
+
+class ProductUpdate(BaseModel):
+    name: Optional[str] = None
+    category_id: Optional[int] = None
+    unit_of_measure: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class ProductResponse(ProductBase):
+    id: int
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class WarehouseBase(BaseModel):
+    code: str
+    name: str
+    address: Optional[str] = None
+
+class WarehouseCreate(WarehouseBase):
+    pass
+
+class WarehouseResponse(WarehouseBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class LocationBase(BaseModel):
+    code: str
+    name: str
+    warehouse_id: int
+
+class LocationCreate(LocationBase):
+    pass
+
+class LocationResponse(LocationBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class ProductStockAvailability(BaseModel):
+    product_id: int
+    location_id: int
+    quantity: float
+
+    class Config:
+        from_attributes = True
+
+
+# --- MEMBER 2: RECEIPTS / INCOMING STOCK SCHEMAS ---
+
+class ReceiptItemCreate(BaseModel):
+    product_id: int
+    location_id: int
+    quantity: float
+
+
+class ReceiptItemResponse(BaseModel):
+    id: int
+    product_id: int
+    location_id: int
+    quantity: float
+
+    class Config:
+        from_attributes = True
+
+
+class ReceiptCreate(BaseModel):
+    supplier_name: str
+    items: List[ReceiptItemCreate]
+
+
+class ReceiptResponse(BaseModel):
+    id: int
+    supplier_name: str
+    status: str
+    created_at: datetime
+    items: List[ReceiptItemResponse]
+
+    class Config:
+        from_attributes = True
