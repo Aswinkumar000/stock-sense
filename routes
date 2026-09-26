@@ -1,0 +1,168 @@
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from database import get_db
+import models
+import schemas
+
+router = APIRouter(prefix="/api", tags=["StockSense API"])
+
+# --- CATEGORY ROUTES ---
+
+@router.post("/categories", response_model=schemas.CategoryResponse, status_code=201)
+def create_category(payload: schemas.CategoryCreate, db: Session = Depends(get_db)):
+    existing = db.query(models.Category).filter(models.Category.name == payload.name).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Category already exists")
+    category = models.Category(**payload.model_dump())
+    db.add(category)
+    db.commit()
+    db.refresh(category)
+    return category
+
+@router.get("/categories", response_model=List[schemas.CategoryResponse])
+def get_categories(db: Session = Depends(get_db)):
+    return db.query(models.Category).all()
+
+
+# --- PRODUCT ROUTES ---
+
+@router.post("/products", response_model=schemas.ProductResponse, status_code=201)
+def create_product(payload: schemas.ProductCreate, db: Session = Depends(get_db)):
+    existing = db.query(models.Product).filter(models.Product.sku == payload.sku).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Product SKU already exists")
+    product = models.Product(**payload.model_dump())
+    db.add(product)
+    db.commit()
+    db.refresh(product)
+    return product
+
+@router.get("/products", response_model=List[schemas.ProductResponse])
+def get_products(db: Session = Depends(get_db)):
+    return db.query(models.Product).all()
+
+@router.get("/products/{product_id}", response_model=schemas.ProductResponse)
+def get_product(product_id: int, db: Session = Depends(get_db)):
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return product
+
+@router.patch("/products/{product_id}", response_model=schemas.ProductResponse)
+def update_product(product_id: int, payload: schemas.ProductUpdate, db: Session = Depends(get_db)):
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    update_data = payload.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(product, key, value)
+    db.commit()
+    db.refresh(product)
+    return product
+
+@router.delete("/products/{product_id}", response_model=schemas.ProductResponse)
+def deactivate_product(product_id: int, db: Session = Depends(get_db)):
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    product.is_active = False
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+# --- WAREHOUSE & LOCATION ROUTES ---
+
+@router.post("/warehouses", response_model=schemas.WarehouseResponse, status_code=201)
+def create_warehouse(payload: schemas.WarehouseCreate, db: Session = Depends(get_db)):
+    warehouse = models.Warehouse(**payload.model_dump())
+    db.add(warehouse)
+    db.commit()
+    db.refresh(warehouse)
+    return warehouse
+
+@router.get("/warehouses", response_model=List[schemas.WarehouseResponse])
+def get_warehouses(db: Session = Depends(get_db)):
+    return db.query(models.Warehouse).all()
+
+@router.post("/locations", response_model=schemas.LocationResponse, status_code=201)
+def create_location(payload: schemas.LocationCreate, db: Session = Depends(get_db)):
+    location = models.Location(**payload.model_dump())
+    db.add(location)
+    db.commit()
+    db.refresh(location)
+    return location
+
+@router.get("/locations", response_model=List[schemas.LocationResponse])
+def get_locations(db: Session = Depends(get_db)):
+    return db.query(models.Location).all()
+
+
+# --- STOCK AVAILABILITY ---
+
+@router.get("/products/{product_id}/stock", response_model=List[schemas.ProductStockAvailability])
+def get_product_stock(product_id: int, db: Session = Depends(get_db)):
+    ledger_entries = db.query(models.StockLedger).filter(models.StockLedger.product_id == product_id).all()
+    stock_by_location = {}
+    for entry in ledger_entries:
+        if entry.dest_location_id:
+            stock_by_location[entry.dest_location_id] = stock_by_location.get(entry.dest_location_id, 0.0) + entry.quantity
+        if entry.src_location_id:
+            stock_by_location[entry.src_location_id] = stock_by_location.get(entry.src_location_id, 0.0) - entry.quantity
+
+    return [
+        schemas.ProductStockAvailability(product_id=product_id, location_id=loc_id, quantity=qty)
+        for loc_id, qty in stock_by_location.items()
+    ]
+
+
+# --- MEMBER 2: RECEIPTS / INCOMING STOCK ROUTES ---
+
+@router.post("/receipts", response_model=schemas.ReceiptResponse, status_code=201)
+def create_receipt(payload: schemas.ReceiptCreate, db: Session = Depends(get_db)):
+    receipt = models.Receipt(supplier_name=payload.supplier_name, status="DRAFT")
+    db.add(receipt)
+    db.flush()
+
+    for item in payload.items:
+        receipt_item = models.ReceiptItem(
+            receipt_id=receipt.id,
+            product_id=item.product_id,
+            location_id=item.location_id,
+            quantity=item.quantity
+        )
+        db.add(receipt_item)
+
+    db.commit()
+    db.refresh(receipt)
+    return receipt
+
+
+@router.get("/receipts", response_model=List[schemas.ReceiptResponse])
+def get_receipts(db: Session = Depends(get_db)):
+    return db.query(models.Receipt).all()
+
+
+@router.post("/receipts/{receipt_id}/validate", response_model=schemas.ReceiptResponse)
+def validate_receipt(receipt_id: int, db: Session = Depends(get_db)):
+    receipt = db.query(models.Receipt).filter(models.Receipt.id == receipt_id).first()
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    if receipt.status == "VALIDATED":
+        raise HTTPException(status_code=400, detail="Receipt is already validated")
+
+    for item in receipt.items:
+        ledger_entry = models.StockLedger(
+            product_id=item.product_id,
+            src_location_id=None,
+            dest_location_id=item.location_id,
+            quantity=item.quantity
+        )
+        db.add(ledger_entry)
+
+    receipt.status = "VALIDATED"
+    db.commit()
+    db.refresh(receipt)
+    return receipt
