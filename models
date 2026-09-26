@@ -1,0 +1,87 @@
+from datetime import datetime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Float
+from sqlalchemy.orm import relationship
+from database import Base
+
+class Category(Base):
+    __tablename__ = "categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False, index=True)
+    description = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    products = relationship("Product", back_populates="category_rel")
+
+
+class Product(Base):
+    __tablename__ = "products"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sku = Column(String(50), unique=True, nullable=False, index=True)
+    name = Column(String(150), nullable=False, index=True)
+    category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
+    unit_of_measure = Column(String(20), nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    category_rel = relationship("Category", back_populates="products")
+
+
+class Warehouse(Base):
+    __tablename__ = "warehouses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(20), unique=True, nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    address = Column(String(255), nullable=True)
+
+    locations = relationship("Location", back_populates="warehouse", cascade="all, delete-orphan")
+
+
+class Location(Base):
+    __tablename__ = "locations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(30), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False)
+
+    warehouse = relationship("Warehouse", back_populates="locations")
+
+
+class StockLedger(Base):
+    __tablename__ = "stock_ledger"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    src_location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
+    dest_location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
+    quantity = Column(Float, nullable=False)
+
+
+# --- MEMBER 2: RECEIPTS / INCOMING STOCK MODELS ---
+
+class Receipt(Base):
+    __tablename__ = "receipts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    supplier_name = Column(String(100), nullable=False)
+    status = Column(String(20), default="DRAFT")  # DRAFT, VALIDATED, CANCELLED
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    items = relationship("ReceiptItem", back_populates="receipt", cascade="all, delete-orphan")
+
+
+class ReceiptItem(Base):
+    __tablename__ = "receipt_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    receipt_id = Column(Integer, ForeignKey("receipts.id"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
+    quantity = Column(Float, nullable=False)
+
+    receipt = relationship("Receipt", back_populates="items")
+    product = relationship("Product")
+    location = relationship("Location")
